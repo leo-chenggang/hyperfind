@@ -19,7 +19,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # uvloop is macOS/Linux only — strip it on Windows
+          (Get-Content requirements.txt) -replace 'uvloop.*', '' | Set-Content requirements-win.txt
+          pip install -r requirements-win.txt
 
       - name: Build with PyInstaller
         run: |
