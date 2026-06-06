@@ -1,16 +1,15 @@
 """
-HyperFind SQLite 元数据库
-管理文件记录和文本块记录。WAL 模式 + 线程安全写入。
+HyperFind — SQLite 元数据库
+WAL 模式 + 线程安全写入。
+管理文件记录、文本块记录，提供统计查询。
 """
 
 import sqlite3
 import threading
-import time
 from pathlib import Path
 from typing import Optional
 
-
-SCHEMA_SQL = """
+SCHEMA = """
 CREATE TABLE IF NOT EXISTS files (
     file_id         TEXT PRIMARY KEY,
     original_path   TEXT NOT NULL,
@@ -41,39 +40,36 @@ CREATE INDEX IF NOT EXISTS idx_chunks_file ON chunks(file_id);
 
 
 class Database:
-    """HyperFind 元数据库"""
+    """HyperFind 元数据库（每应用实例一个连接）"""
 
     def __init__(self, db_path: Path):
-        self.db_path = Path(db_path)
+        self.db_path = Path(db_path)          # 防御性包裹
         self._lock = threading.Lock()
-        self._conn: Optional[sqlite3.Connection] = None
-        self._connect()
+        self._conn = self._connect()
         self._init_schema()
 
-    def _connect(self) -> None:
-        """连接数据库并启用 WAL 模式"""
-        self._conn = sqlite3.connect(
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(
             str(self.db_path),
             check_same_thread=False,
             timeout=30,
         )
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode = WAL")
-        self._conn.execute("PRAGMA synchronous = NORMAL")
-        self._conn.execute("PRAGMA foreign_keys = OFF")
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA foreign_keys = OFF")
+        return conn
 
     def _init_schema(self) -> None:
-        """初始化数据库表"""
         with self._lock:
             with self._conn:
-                self._conn.executescript(SCHEMA_SQL)
+                self._conn.executescript(SCHEMA)
 
-    # ── 文件操作 ──────────────────────────────────
+    # ── 文件 CRUD ──────────────────────────────────────
 
-    def file_exists(self, md5_hash: str) -> bool:
-        """检查文件是否已存在"""
+    def file_exists(self, file_id: str) -> bool:
         row = self._conn.execute(
-            "SELECT 1 FROM files WHERE file_id = ?", (md5_hash,)
+            "SELECT 1 FROM files WHERE file_id = ?", (file_id,)
         ).fetchone()
         return row is not None
 
@@ -89,7 +85,6 @@ class Database:
         file_size: int,
         chunk_count: int = 0,
     ) -> None:
-        """添加文件记录"""
         with self._lock:
             with self._conn:
                 self._conn.execute(
@@ -103,21 +98,18 @@ class Database:
                 )
 
     def get_file(self, file_id: str) -> Optional[dict]:
-        """获取单个文件记录"""
         row = self._conn.execute(
             "SELECT * FROM files WHERE file_id = ?", (file_id,)
         ).fetchone()
         return dict(row) if row else None
 
     def get_all_files(self) -> list[dict]:
-        """获取所有文件记录"""
         rows = self._conn.execute(
             "SELECT * FROM files ORDER BY uploaded_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]
 
     def get_files_by_type(self, file_type: str) -> list[dict]:
-        """按类型获取文件"""
         rows = self._conn.execute(
             "SELECT * FROM files WHERE file_type = ? ORDER BY uploaded_at DESC",
             (file_type,),
@@ -125,43 +117,38 @@ class Database:
         return [dict(r) for r in rows]
 
     def get_file_count_by_type(self) -> dict:
-        """获取各类型文件数量"""
         rows = self._conn.execute(
-            "SELECT file_type, COUNT(*) as cnt FROM files GROUP BY file_type"
+            "SELECT file_type, COUNT(*) AS cnt FROM files GROUP BY file_type"
         ).fetchall()
         return {r["file_type"]: r["cnt"] for r in rows}
 
     def get_total_files(self) -> int:
-        """获取文件总数"""
-        row = self._conn.execute("SELECT COUNT(*) as cnt FROM files").fetchone()
+        row = self._conn.execute("SELECT COUNT(*) AS cnt FROM files").fetchone()
         return row["cnt"] if row else 0
 
+    def get_all_file_ids(self) -> list[str]:
+        rows = self._conn.execute("SELECT file_id FROM files").fetchall()
+        return [r["file_id"] for r in rows]
+
     def delete_file(self, file_id: str) -> Optional[dict]:
-        """删除文件及其关联的文本块记录"""
         file = self.get_file(file_id)
         if not file:
             return None
         with self._lock:
             with self._conn:
-                self._conn.execute(
-                    "DELETE FROM chunks WHERE file_id = ?", (file_id,)
-                )
-                self._conn.execute(
-                    "DELETE FROM files WHERE file_id = ?", (file_id,)
-                )
+                self._conn.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))
+                self._conn.execute("DELETE FROM files WHERE file_id = ?", (file_id,))
         return file
 
     def clear_all(self) -> None:
-        """清空所有文件和文本块"""
         with self._lock:
             with self._conn:
                 self._conn.execute("DELETE FROM chunks")
                 self._conn.execute("DELETE FROM files")
 
-    # ── 文本块操作 ──────────────────────────────────
+    # ── 文本块 ──────────────────────────────────────────
 
     def add_chunks(self, chunks: list[dict]) -> None:
-        """批量添加文本块"""
         with self._lock:
             with self._conn:
                 self._conn.executemany(
@@ -173,33 +160,33 @@ class Database:
                 )
 
     def get_chunks_by_file(self, file_id: str) -> list[dict]:
-        """获取某文件的所有文本块"""
         rows = self._conn.execute(
             "SELECT * FROM chunks WHERE file_id = ? ORDER BY chunk_index",
             (file_id,),
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_all_file_ids(self) -> list[str]:
-        """获取所有文件 ID"""
-        rows = self._conn.execute("SELECT file_id FROM files").fetchall()
-        return [r["file_id"] for r in rows]
+    def get_chunk(self, chunk_id: str) -> Optional[dict]:
+        row = self._conn.execute(
+            "SELECT * FROM chunks WHERE chunk_id = ?", (chunk_id,)
+        ).fetchone()
+        return dict(row) if row else None
 
-    # ── 状态查询 ──────────────────────────────────
+    # ── 统计 ────────────────────────────────────────────
 
     def get_stats(self) -> dict:
-        """获取数据库统计信息"""
         total_files = self.get_total_files()
         by_type = self.get_file_count_by_type()
-        total_chunks_row = self._conn.execute(
-            "SELECT COUNT(*) as cnt FROM chunks"
-        ).fetchone()
-        total_chunks = total_chunks_row["cnt"] if total_chunks_row else 0
 
-        last_indexed_row = self._conn.execute(
-            "SELECT MAX(last_indexed_at) as ts FROM files"
+        row_chunks = self._conn.execute(
+            "SELECT COUNT(*) AS cnt FROM chunks"
         ).fetchone()
-        last_indexed = last_indexed_row["ts"] if last_indexed_row else None
+        total_chunks = row_chunks["cnt"] if row_chunks else 0
+
+        row_last = self._conn.execute(
+            "SELECT MAX(last_indexed_at) AS ts FROM files"
+        ).fetchone()
+        last_indexed = row_last["ts"] if row_last else None
 
         db_size = self.db_path.stat().st_size if self.db_path.exists() else 0
 

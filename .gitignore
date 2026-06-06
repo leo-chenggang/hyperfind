@@ -12,3 +12,6 @@ __MACOSX/
 *.db
 *.db-wal
 *.db-shm
+models/
+*.icns
+/tmp/

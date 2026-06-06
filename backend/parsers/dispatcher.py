@@ -12,7 +12,7 @@ from backend.parsers.ppt_parser import PPTParser
 from backend.parsers.html_parser import HTMLParser
 from backend.parsers.markdown_parser import MarkdownParser
 
-# 扩展名 → (解析器, file_type)
+
 PARSER_MAP = {
     ".xlsx": (ExcelParser(), "excel"),
     ".xls":  (ExcelParser(), "excel"),
@@ -28,12 +28,10 @@ PARSER_MAP = {
 
 
 class FormatDispatchError(Exception):
-    """不支持的格式"""
-    pass
+    """不支持的文件格式"""
 
 
 def get_parser(ext: str) -> tuple:
-    """返回 (parser_instance, file_type) 或抛出 FormatDispatchError"""
     ext_lower = ext.lower()
     if ext_lower not in PARSER_MAP:
         raise FormatDispatchError(f"不支持的文件格式: {ext}")
@@ -41,16 +39,14 @@ def get_parser(ext: str) -> tuple:
 
 
 def detect_file_type(file_path: Path) -> Optional[str]:
-    """根据文件扩展名检测文件类型"""
     ext = file_path.suffix.lower()
-    if ext in PARSER_MAP:
-        return PARSER_MAP[ext][1]
-    return None
+    entry = PARSER_MAP.get(ext)
+    return entry[1] if entry else None
 
 
 def parse_file(file_path: Path) -> list[dict]:
     """
-    解析单个文件，返回文本块列表。
+    解析单个文件，返回原始文本块列表。
 
     返回: [{"content": "文本", "char_offset": 0}, ...]
     """

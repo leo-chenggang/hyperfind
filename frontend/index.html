@@ -8,7 +8,7 @@
 </head>
 <body>
 
-    <!-- ── 启动加载画面 ── -->
+    <!-- 启动加载画面 -->
     <div id="loadingOverlay">
         <div class="loading-box">
             <div class="loading-spinner"></div>
@@ -17,18 +17,13 @@
         </div>
     </div>
 
-    <!-- ============================================================ -->
-    <!-- 主体布局: 侧边栏 + 主内容区                                      -->
-    <!-- ============================================================ -->
+    <!-- 主体布局: 侧边栏 + 主内容区 -->
     <div id="app-container">
-
-        <!-- ── 左侧: 文件仓库 (始终可见) ── -->
         <aside id="sidebar">
             <div class="sidebar-header">
-                <span class="sidebar-title">📁 文件仓库</span>
+                <span class="sidebar-title">&#x1F4C1; 文件仓库</span>
             </div>
             <nav class="sidebar-nav" id="sidebarNav">
-                <!-- JS 动态填充 -->
                 <div class="sidebar-empty">暂无文件</div>
             </nav>
             <div class="sidebar-footer">
@@ -37,139 +32,96 @@
             </div>
         </aside>
 
-        <!-- ── 右侧: 主内容区 ── -->
         <main id="main-content">
-            <!-- 标签切换 -->
             <nav class="tabs" id="mainTabs">
                 <button class="tab active" data-tab="upload">上传中心</button>
                 <button class="tab" data-tab="search">混合搜索</button>
             </nav>
 
-            <!-- ═══════════════════════════════════════════════════ -->
-            <!-- 面板 1: 上传中心                                        -->
-            <!-- ═══════════════════════════════════════════════════ -->
+            <!-- 面板 1: 上传中心 -->
             <section class="panel" id="panelUpload">
-                <!-- 拖拽上传区 -->
                 <div class="dropzone" id="dropzone">
-                    <div class="dropzone-icon">📤</div>
+                    <div class="dropzone-icon">&#x1F4E4;</div>
                     <div class="dropzone-title">拖拽文件到此处</div>
                     <div class="dropzone-subtitle">或点击选择文件</div>
                     <div class="dropzone-hint">
-                        支持 Word · Excel · PDF · PowerPoint · HTML · Markdown
+                        支持 Word &middot; Excel &middot; PDF &middot; PowerPoint &middot; HTML &middot; Markdown
                     </div>
                 </div>
-
-                <!-- 进度条区域 -->
-                <div class="progress-grid" id="progressGrid">
-                    <!-- JS 动态创建: 每个文件一个 .progress-row -->
-                </div>
-
-                <!-- 底部操作栏 -->
+                <div class="progress-grid" id="progressGrid"></div>
                 <div class="upload-actions">
                     <button class="btn-secondary" id="btnClearDone">清除已完成</button>
                     <button class="btn-primary" id="btnSelectFiles">选择文件上传</button>
                 </div>
             </section>
 
-            <!-- ═══════════════════════════════════════════════════ -->
-            <!-- 面板 2: 文件仓库 (侧边栏点击类型时在此显示详细列表)      -->
-            <!-- ═══════════════════════════════════════════════════ -->
+            <!-- 面板 2: 文件仓库详情 -->
             <section class="panel panel-hidden" id="panelRepository">
                 <div class="repo-header" id="repoHeader">
-                    <span class="repo-title" id="repoTitle">📝 Word 文档</span>
+                    <span class="repo-title" id="repoTitle"></span>
                     <div class="repo-sort">
                         <button class="sort-btn active" data-sort="name">按名称</button>
                         <button class="sort-btn" data-sort="date">按日期</button>
                     </div>
                 </div>
-                <div class="repo-list" id="repoList">
-                    <!-- JS 动态填充: 每个文件一个 .file-card -->
-                </div>
+                <div class="repo-list" id="repoList"></div>
                 <div class="repo-empty" id="repoEmpty">该类型暂无文件</div>
             </section>
 
-            <!-- ═══════════════════════════════════════════════════ -->
-            <!-- 面板 3: 混合搜索                                        -->
-            <!-- ═══════════════════════════════════════════════════ -->
+            <!-- 面板 3: 混合搜索 -->
             <section class="panel panel-hidden" id="panelSearch">
-                <!-- 搜索框 -->
                 <div class="search-bar">
-                    <span class="search-icon">🔍</span>
-                    <input type="text"
-                           class="search-input"
-                           id="searchInput"
-                           placeholder="输入搜索内容..."
-                           autocomplete="off">
+                    <span class="search-icon">&#x1F50D;</span>
+                    <input type="text" class="search-input" id="searchInput"
+                           placeholder="输入搜索内容..." autocomplete="off">
                     <button class="btn-primary" id="btnSearch">搜索</button>
                     <button class="btn-secondary" id="btnClearSearch">清除</button>
                 </div>
-
-                <!-- 筛选栏 -->
                 <div class="search-filters" id="searchFilters">
-                    <label>
-                        类型:
+                    <label>类型:
                         <select id="filterType">
                             <option value="all">全部类型</option>
-                            <option value="excel">📊 Excel</option>
-                            <option value="word">📝 Word</option>
-                            <option value="pdf">📄 PDF</option>
-                            <option value="powerpoint">📽 PowerPoint</option>
-                            <option value="html">🌐 HTML</option>
-                            <option value="markdown">📑 Markdown</option>
+                            <option value="excel">&#x1F4CA; Excel</option>
+                            <option value="word">&#x1F4DD; Word</option>
+                            <option value="pdf">&#x1F4C4; PDF</option>
+                            <option value="powerpoint">&#x1F4FD; PowerPoint</option>
+                            <option value="html">&#x1F310; HTML</option>
+                            <option value="markdown">&#x1F4D1; Markdown</option>
                         </select>
                     </label>
-                    <label>
-                        模式:
+                    <label>模式:
                         <select id="filterMode">
                             <option value="hybrid">混合搜索</option>
                             <option value="keyword">精确匹配</option>
                             <option value="semantic">语义搜索</option>
                         </select>
                     </label>
-                    <label class="threshold-label">
-                        匹配阈值:
+                    <label class="threshold-label">匹配阈值:
                         <input type="range" id="filterThreshold" min="1" max="3" value="2">
                         <span id="thresholdLabel">中</span>
                     </label>
                 </div>
-
-                <!-- 搜索结果摘要 -->
                 <div class="search-summary" id="searchSummary"></div>
-
-                <!-- 搜索结果列表 -->
-                <div class="search-results" id="searchResults">
-                    <!-- JS 动态填充: 每个文件一个 .result-card -->
-                </div>
-
-                <!-- 导出操作栏 (搜索有结果后才显示) -->
+                <div class="search-results" id="searchResults"></div>
                 <div class="export-bar" id="exportBar" style="display:none">
                     <span class="export-info" id="exportInfo"></span>
-                    <button class="btn-primary" id="btnExport">📋 复制所有匹配文件到...</button>
-                    <button class="btn-secondary" id="btnOpenFolder">📂 打开所在文件夹</button>
+                    <button class="btn-primary" id="btnExport">&#x1F4CB; 复制所有匹配文件到...</button>
+                    <button class="btn-secondary" id="btnOpenFolder">&#x1F4C2; 打开所在文件夹</button>
                 </div>
             </section>
         </main>
     </div>
 
-    <!-- ============================================================ -->
-    <!-- 底部状态栏                                                      -->
-    <!-- ============================================================ -->
     <footer id="statusbar">
-        <span id="statusTotal">📊 仓库共有 0 个文件</span>
+        <span id="statusTotal">&#x1F4CA; 仓库共有 0 个文件</span>
         <span class="status-divider">|</span>
-        <span id="statusLinks">📦 硬链接: 0 · 软链接: 0 · 克隆: 0 · 复制: 0</span>
+        <span id="statusLinks">&#x1F4E6; 硬链接: 0 &middot; 软链接: 0 &middot; 克隆: 0 &middot; 复制: 0</span>
         <span class="status-divider">|</span>
         <span id="statusIndexed">上次索引: --</span>
     </footer>
 
-    <!-- ============================================================ -->
-    <!-- Toast 通知区                                                    -->
-    <!-- ============================================================ -->
     <div class="toast-area" id="toastArea"></div>
 
-    <!-- ============================================================ -->
-    <!-- 确认对话框                                                      -->
-    <!-- ============================================================ -->
     <div class="modal-overlay" id="modalOverlay">
         <div class="modal-box" id="modalBox">
             <div class="modal-title" id="modalTitle">确认操作</div>

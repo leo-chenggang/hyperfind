@@ -6,31 +6,28 @@ from pathlib import Path
 
 
 class WordParser:
-    """解析 Word 文档，提取段落文本"""
+    """解析 Word 文档，提取段落和表格文本"""
 
     def parse(self, file_path: Path) -> list[dict]:
+        from docx import Document
+
         try:
-            from docx import Document
             doc = Document(str(file_path))
         except Exception:
             return []
 
         paragraphs = []
-        offset = 0
-
         for para in doc.paragraphs:
             text = para.text.strip()
             if text:
                 paragraphs.append(text)
 
-        if not paragraphs:
-            # 也检查表格
-            for table in doc.tables:
-                for row in table.rows:
-                    cells = [cell.text.strip() for cell in row.cells]
-                    line = " | ".join(cells)
-                    if line.strip():
-                        paragraphs.append(line)
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [cell.text.strip() for cell in row.cells]
+                line = " | ".join(c for c in cells if c)
+                if line:
+                    paragraphs.append(line)
 
         if not paragraphs:
             return []

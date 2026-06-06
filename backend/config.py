@@ -1,80 +1,87 @@
 """
-HyperFind 应用配置
-管理数据目录、模型路径、缓存策略。
+HyperFind — 应用配置
+- 平台自适应数据目录
+- ONNX 模型路径解析（开发/打包双模式）
+- 目录初始化与缓存清理
 """
 
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Optional
 
 
-def _get_data_home() -> Path:
-    """获取平台对应的数据目录"""
+def _data_home() -> Path:
+    """平台对应的应用数据目录"""
     if sys.platform == "darwin":
         base = Path.home() / "Library" / "Application Support"
     elif sys.platform == "win32":
-        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+        base = Path(os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming")))
     else:
         base = Path.home() / ".local" / "share"
     return base / "HyperFind"
 
 
 class AppConfig:
-    """HyperFind 全局配置"""
+    """HyperFind 全局配置
+
+    数据目录结构::
+
+        ~/Library/Application Support/HyperFind/
+        ├── library/          # 文件仓库（硬链接/软链接）
+        │   ├── Excel/
+        │   ├── Word/
+        │   ├── PDF/
+        │   ├── PowerPoint/
+        │   ├── HTML/
+        │   └── Markdown/
+        ├── chroma_db/        # ChromaDB 持久化向量索引
+        ├── metadata.db       # SQLite 元数据库
+        ├── bm25_index.pkl    # BM25 序列化索引
+        └── cache/            # 临时缓存（退出时清空）
+    """
+
+    FILE_TYPES = ("Excel", "Word", "PDF", "PowerPoint", "HTML", "Markdown")
 
     def __init__(self, data_home: Optional[Path] = None):
-        self.data_home = data_home or _get_data_home()
+        self.data_home = data_home or _data_home()
 
-        # 仓库目录 — 硬链接/软链接存储
-        self.library_dir = self.data_home / "library"
-
-        # 数据库文件
-        self.db_path = self.data_home / "metadata.db"
-
-        # ChromaDB 持久化路径
-        self.chroma_dir = self.data_home / "chroma_db"
-
-        # BM25 索引序列化路径
-        self.bm25_path = self.data_home / "bm25_index.pkl"
-
-        # 临时缓存 (退出时清空)
-        self.cache_dir = self.data_home / "cache"
-
-        # ONNX 模型路径
-        self.model_dir = self._resolve_model_dir()
+        self.library_dir: Path = self.data_home / "library"
+        self.db_path: Path = self.data_home / "metadata.db"
+        self.chroma_dir: Path = self.data_home / "chroma_db"
+        self.bm25_path: Path = self.data_home / "bm25_index.pkl"
+        self.cache_dir: Path = self.data_home / "cache"
+        self.model_dir: Path = self._resolve_model_dir()
 
     def _resolve_model_dir(self) -> Path:
-        """解析 ONNX 模型目录"""
-        # 开发模式：项目根目录
-        dev_path = Path(__file__).resolve().parent.parent / "models" / "multilingual-minilm"
-        if dev_path.exists():
-            return dev_path
-        # 打包模式：与可执行文件同级 (PyInstaller)
+        """解析 ONNX 模型目录
+
+        优先级:
+        1. 开发模式 — 项目根目录下的 models/multilingual-minilm/
+        2. 打包模式 — 与可执行文件同级的 models/multilingual-minilm/
+        """
+        dev = Path(__file__).resolve().parent.parent / "models" / "multilingual-minilm"
+        if dev.exists():
+            return dev
         if getattr(sys, "frozen", False):
-            bundle_path = Path(sys.executable).parent / "models" / "multilingual-minilm"
-            if bundle_path.exists():
-                return bundle_path
-        return dev_path
+            bundle = Path(sys.executable).parent / "models" / "multilingual-minilm"
+            if bundle.exists():
+                return bundle
+        return dev
 
     def ensure_dirs(self) -> None:
-        """确保所有数据目录存在"""
-        dirs = [
-            self.data_home,
-            self.library_dir,
-            self.cache_dir,
-            self.chroma_dir,
-        ]
-        for d in dirs:
+        """创建所有数据目录及子目录"""
+        for d in (self.data_home, self.library_dir, self.cache_dir, self.chroma_dir):
             d.mkdir(parents=True, exist_ok=True)
-
-        # 创建文件类型子目录
-        for ft in ("Excel", "Word", "PDF", "PowerPoint", "HTML", "Markdown"):
+        for ft in self.FILE_TYPES:
             (self.library_dir / ft).mkdir(parents=True, exist_ok=True)
 
     def clear_cache(self) -> None:
-        """清空临时缓存（退出时调用）"""
-        import shutil
-        if self.cache_dir.exists():
-            shutil.rmtree(self.cache_dir)
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
+        """清空临时缓存（退出时调用，保留核心索引）"""
+        try:
+            if self.cache_dir.exists():
+                shutil.rmtree(self.cache_dir)
+                self.cache_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass

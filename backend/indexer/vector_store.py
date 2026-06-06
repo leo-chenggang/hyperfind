@@ -1,22 +1,16 @@
 """
 ChromaDB 向量存储封装
-持久化向量索引, HNSW + 余弦相似度
+HNSW + 余弦相似度。完全离线，遥测已禁用。
 """
 
 import os
 from pathlib import Path
 from typing import Optional
 
-# 禁用 ChromaDB 遥测（离线应用不需要）
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
 import chromadb
 from chromadb.config import Settings
-
-
-def _get_np():
-    import numpy
-    return numpy
 
 
 class VectorStore:
@@ -39,10 +33,7 @@ class VectorStore:
         """初始化 ChromaDB 客户端和 collection"""
         self._client = chromadb.PersistentClient(
             path=str(self.persist_dir),
-            settings=Settings(
-                anonymized_telemetry=False,
-                allow_reset=True,
-            ),
+            settings=Settings(anonymized_telemetry=False, allow_reset=True),
         )
         self._collection = self._client.get_or_create_collection(
             name=self.COLLECTION_NAME,
@@ -64,13 +55,11 @@ class VectorStore:
     def add_vectors(
         self,
         ids: list[str],
-        embeddings,  # numpy array (n, 384) → list of list
+        embeddings,
         documents: list[str],
         metadatas: list[dict],
     ) -> None:
         """批量添加向量到 ChromaDB"""
-        np = _get_np()
-        # ChromaDB 需要原生 Python list — 用 tolist()
         emb_list = embeddings.tolist() if hasattr(embeddings, "tolist") else embeddings
         self.collection.add(
             ids=ids,
@@ -81,23 +70,15 @@ class VectorStore:
 
     def query(
         self,
-        query_embedding,  # numpy array (1, 384) or list
-        n_results: int = 20,
+        query_embedding,
+        n_results: int = 30,
         where: Optional[dict] = None,
     ) -> dict:
-        """
-        查询最相似的向量。
+        """查询最相似的向量
 
         返回 ChromaDB 原始结果:
-        {
-            "ids": [[...]],
-            "distances": [[...]],
-            "metadatas": [[...]],
-            "documents": [[...]],
-        }
+        {"ids": [[...]], "distances": [[...]], "metadatas": [[...]], "documents": [[...]]}
         """
-        np = _get_np()
-        # ChromaDB 需要原生 Python float — 必须用 .tolist()
         if hasattr(query_embedding, "tolist"):
             vec = query_embedding.tolist()
         elif isinstance(query_embedding, list):
@@ -105,23 +86,17 @@ class VectorStore:
         else:
             vec = list(query_embedding)
 
-        # 处理 2D 数组 (如 embs[0:1]) — 取第一行
         if vec and isinstance(vec[0], list):
             vec = vec[0]
-
-        # 确保是 float 列表
         vec = [float(v) for v in vec]
 
-        # Clamp n_results
         count = self.collection.count()
         if count == 0:
             return {"ids": [[]], "distances": [[]], "metadatas": [[]], "documents": [[]]}
-        n = min(n_results, count)
 
-        kwargs = {"query_embeddings": [vec], "n_results": n}
+        kwargs: dict = {"query_embeddings": [vec], "n_results": min(n_results, count)}
         if where:
             kwargs["where"] = where
-
         return self.collection.query(**kwargs)
 
     def delete_by_file_id(self, file_id: str) -> None:

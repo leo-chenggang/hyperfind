@@ -6,18 +6,18 @@ from pathlib import Path
 
 
 class PPTParser:
-    """解析 PowerPoint 文件，提取幻灯片文本"""
+    """解析 PowerPoint 文件，提取幻灯片文本（含表格）"""
 
     def parse(self, file_path: Path) -> list[dict]:
+        from pptx import Presentation
+
         try:
-            from pptx import Presentation
             prs = Presentation(str(file_path))
         except Exception:
             return []
 
         results = []
         offset = 0
-
         for slide_num, slide in enumerate(prs.slides):
             texts = []
             for shape in slide.shapes:
@@ -27,19 +27,13 @@ class PPTParser:
                         if t:
                             texts.append(t)
                 if shape.has_table:
-                    table = shape.table
-                    for row in table.rows:
+                    for row in shape.table.rows:
                         cells = [cell.text.strip() for cell in row.cells]
-                        line = " | ".join(cells)
-                        if line.strip():
+                        line = " | ".join(c for c in cells if c)
+                        if line:
                             texts.append(line)
-
             if texts:
                 slide_text = f"[Slide {slide_num + 1}]\n" + "\n".join(texts)
-                results.append({
-                    "content": slide_text.strip(),
-                    "char_offset": offset,
-                })
+                results.append({"content": slide_text.strip(), "char_offset": offset})
                 offset += len(slide_text)
-
         return results
