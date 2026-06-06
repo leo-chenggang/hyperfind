@@ -379,7 +379,7 @@ def main():
     def on_loaded():
         """前端加载完成 → 后台初始化引擎"""
         def _init():
-            time.sleep(0.1)
+            time.sleep(0.3)  # 等前端 JS event handlers 全部就绪
             try:
                 api.db = Database(Path(api.config.db_path))
             except Exception as e:

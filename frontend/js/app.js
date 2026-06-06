@@ -590,18 +590,11 @@ window._eventBus.on('app:ready', function() {
     refreshAllPanels();
 });
 
-// 引擎在加载完整前端前已初始化完毕 — 直接隐藏启动画面
+// 引擎在后台线程初始化完成后发送 app:ready → 隐藏 loading overlay
+// 注意：不在 DOMContentLoaded 中隐藏 — 引擎可能还未就绪
 document.addEventListener('DOMContentLoaded', function() {
     loadSidebar();
     updateStatusbar();
-    // 延时隐藏 loading overlay（等 sidebar 首次渲染完成）
-    setTimeout(function() {
-        var overlay = document.getElementById('loadingOverlay');
-        if (overlay) {
-            overlay.classList.add('fade-out');
-            setTimeout(function() { overlay.style.display = 'none'; }, 400);
-        }
-    }, 300);
 });
 
 document.getElementById('btnClearAll').addEventListener('click', async function() {
