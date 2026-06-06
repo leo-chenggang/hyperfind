@@ -65,24 +65,6 @@ class HyperFindAPI:
         config.model_dir = str(config.model_dir)
         config.bm25_path = str(config.bm25_path)
 
-    def initialize(self) -> None:
-        """后台异步初始化（在 webview on_loaded 线程中调用）"""
-        try:
-            self.db = Database(Path(self.config.db_path))
-
-            self._upload_engine = ConcurrentUploadEngine(
-                self.config, self.db, notify_callback=self._notify_ui
-            )
-            self._search_engine = HybridSearchEngine(self.db, self._upload_engine)
-            self._notify_ui("app:ready", {
-                "version": "1.0.0",
-                "total_files": self.db.get_total_files(),
-            })
-        except Exception as e:
-            import traceback
-            print("[INIT ERROR]", traceback.format_exc())
-            self._notify_ui("app:error", {"message": str(e)})
-
     def _notify_ui(self, event: str, data: dict) -> None:
         """推送事件到前端（进度事件防抖 + 状态变更放行）"""
         if not self._window:
@@ -336,8 +318,37 @@ class HyperFindAPI:
 
 
 # ═══════════════════════════════════════════════════════
-# Main Entry — 单实例锁 + _window_created 守卫
+# Main Entry — 单实例锁 + 立即显示窗口
 # ═══════════════════════════════════════════════════════
+
+SPLASH_HTML = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;background:#fff;color:#1A1A2E;-webkit-font-smoothing:antialiased}
+.loading-overlay{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px}
+.spinner{width:36px;height:36px;border:3px solid #DEE2E6;border-top-color:#4263EB;border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.title{font-size:18px;font-weight:700;letter-spacing:-0.02em}
+.status{font-size:13px;color:#6C757D}
+.bar-track{width:200px;height:4px;background:#E9ECEF;border-radius:2px;overflow:hidden}
+.bar-fill{height:100%;background:#4263EB;border-radius:2px;width:0%;transition:width 0.3s}
+</style></head>
+<body>
+<div class="loading-overlay">
+    <div class="spinner"></div>
+    <div class="title">HyperFind</div>
+    <div class="status" id="status">正在启动...</div>
+    <div class="bar-track"><div class="bar-fill" id="bar"></div></div>
+</div>
+<script>
+window.onBackendEvent=function(p){try{var d=typeof p==='string'?JSON.parse(p):p;var e=d.event,dd=d.data;
+if(e==='splash:progress'){var s=document.getElementById('status');if(s)s.textContent=dd.status||'';var b=document.getElementById('bar');if(b)b.style.width=(dd.progress||0)*100+'%'}
+}catch(_){}}
+</script>
+</body>
+</html>"""
 
 _window_created = False
 
@@ -352,7 +363,7 @@ def main():
             old_pid = int(lock_path.read_text().strip())
             try:
                 os.kill(old_pid, 0)
-                return  # 已有实例运行
+                return
             except (OSError, ProcessLookupError):
                 pass
         lock_path.write_text(str(os.getpid()))
@@ -367,9 +378,10 @@ def main():
     config = AppConfig()
     api = HyperFindAPI(config)
 
+    # 使用 inline HTML 立即显示窗口（零文件 I/O，无延迟）
     window = webview.create_window(
         title="HyperFind",
-        url=str(PROJECT_ROOT / "frontend" / "index.html"),
+        html=SPLASH_HTML,
         js_api=api,
         width=1200,
         height=800,
@@ -379,13 +391,46 @@ def main():
     )
     api._window = window
 
+    frontend_url = "file://" + str(PROJECT_ROOT / "frontend" / "index.html")
+
     def on_loaded():
-        threading.Thread(target=api.initialize, daemon=True).start()
+        """Splash 页面加载完成 → 后台初始化引擎 → 完成后切换到完整前端"""
+        def _init():
+            # 阶段 1: 数据库
+            api._notify_ui("splash:progress", {"status": "连接数据库...", "progress": 0.1})
+            try:
+                api.db = Database(Path(api.config.db_path))
+            except Exception as e:
+                api._notify_ui("splash:progress", {"status": f"数据库错误: {e}", "progress": 0})
+                return
+
+            # 阶段 2: 上传引擎
+            api._notify_ui("splash:progress", {"status": "启动搜索引擎...", "progress": 0.3})
+            try:
+                api._upload_engine = ConcurrentUploadEngine(
+                    api.config, api.db, notify_callback=api._notify_ui
+                )
+            except Exception as e:
+                api._notify_ui("splash:progress", {"status": f"引擎错误: {e}", "progress": 0})
+                return
+
+            # 阶段 3: 搜索引擎
+            api._notify_ui("splash:progress", {"status": "准备完成...", "progress": 0.8})
+            try:
+                api._search_engine = HybridSearchEngine(api.db, api._upload_engine)
+            except Exception as e:
+                api._notify_ui("splash:progress", {"status": f"搜索错误: {e}", "progress": 0})
+                return
+
+            api._notify_ui("splash:progress", {"status": "加载界面...", "progress": 1.0})
+            # 切换到完整前端
+            window.load_url(frontend_url)
+
+        threading.Thread(target=_init, daemon=True).start()
 
     window.events.loaded += on_loaded
     webview.start(debug=False, private_mode=False)
 
-    # 退出时清理缓存
     cleanup_on_exit(config.cache_dir)
 
 

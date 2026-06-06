@@ -590,10 +590,18 @@ window._eventBus.on('app:ready', function() {
     refreshAllPanels();
 });
 
-window._eventBus.on('app:error', function(data) {
-    showToast('启动错误: ' + (data.message || '未知错误'), 'error');
-    var statusEl = document.getElementById('loadingStatus');
-    if (statusEl) statusEl.textContent = '错误: ' + (data.message || '');
+// 引擎在加载完整前端前已初始化完毕 — 直接隐藏启动画面
+document.addEventListener('DOMContentLoaded', function() {
+    loadSidebar();
+    updateStatusbar();
+    // 延时隐藏 loading overlay（等 sidebar 首次渲染完成）
+    setTimeout(function() {
+        var overlay = document.getElementById('loadingOverlay');
+        if (overlay) {
+            overlay.classList.add('fade-out');
+            setTimeout(function() { overlay.style.display = 'none'; }, 400);
+        }
+    }, 300);
 });
 
 document.getElementById('btnClearAll').addEventListener('click', async function() {
@@ -610,11 +618,3 @@ document.getElementById('btnClearAll').addEventListener('click', async function(
     }
 });
 
-// ═══════════════════════════════════════════════════════════
-// Initialization
-// ═══════════════════════════════════════════════════════════
-
-document.addEventListener('DOMContentLoaded', function() {
-    loadSidebar();
-    updateStatusbar();
-});
