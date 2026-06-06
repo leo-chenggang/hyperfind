@@ -370,21 +370,22 @@ def main():
             sys.exit(1)
         sys.exit(0)
 
-    # 直接加载完整前端（COLLECT 模式零解压延迟，窗口瞬间出现）
+    # ── 解析前端路径（支持 dev / PyInstaller EXE 两种模式）──
     frontend_index = PROJECT_ROOT / "frontend" / "index.html"
-    if not frontend_index.exists():
-        if getattr(sys, "frozen", False):
-            alt = PROJECT_ROOT.parent / "Resources" / "frontend" / "index.html"
-            if alt.exists():
-                frontend_index = alt
-    if not frontend_index.exists():
-        alt2 = Path(sys.executable).parent / "frontend" / "index.html" if getattr(sys, "frozen", False) else None
-        if alt2 and alt2.exists():
+    if not frontend_index.exists() and getattr(sys, "frozen", False):
+        alt = PROJECT_ROOT.parent / "Resources" / "frontend" / "index.html"
+        if alt.exists():
+            frontend_index = alt
+    if not frontend_index.exists() and getattr(sys, "frozen", False):
+        alt2 = Path(sys._MEIPASS) / "frontend" / "index.html"
+        if alt2.exists():
             frontend_index = alt2
+    _frontend_url = "file://" + str(frontend_index)
 
+    # ── 内嵌启动画面：零 I/O 延迟，窗口瞬间显示 ──
     window = webview.create_window(
         title="HyperFind",
-        url="file://" + str(frontend_index),
+        html=SPLASH_HTML,
         js_api=api,
         width=1200,
         height=800,
@@ -394,32 +395,63 @@ def main():
     )
     api._window = window
 
+    _splash_done = False
+
     def on_loaded():
-        """前端加载完成 → 后台初始化引擎"""
-        def _init():
-            time.sleep(0.3)  # 等前端 JS event handlers 全部就绪
-            try:
-                api.db = Database(Path(api.config.db_path))
-            except Exception as e:
-                api._notify_ui("app:error", {"message": str(e)})
-                return
-            try:
-                api._upload_engine = ConcurrentUploadEngine(
-                    api.config, api.db, notify_callback=api._notify_ui
-                )
-            except Exception as e:
-                api._notify_ui("app:error", {"message": str(e)})
-                return
-            try:
-                api._search_engine = HybridSearchEngine(api.db, api._upload_engine)
-            except Exception as e:
-                api._notify_ui("app:error", {"message": str(e)})
-                return
+        """启动画面加载完成 → 后台初始化引擎 → 加载完整前端"""
+        nonlocal _splash_done
+        if not _splash_done:
+            # 第一次 loaded：启动画面就绪 → 开始后台初始化
+            _splash_done = True
+
+            def _init():
+                time.sleep(0.2)
+
+                # Phase 1 — 数据库
+                api._notify_ui("splash:progress",
+                               {"status": "连接数据库...", "progress": 0.1})
+                try:
+                    api.db = Database(Path(api.config.db_path))
+                except Exception as e:
+                    api._notify_ui("app:error", {"message": "数据库初始化失败: " + str(e)})
+                    return
+
+                # Phase 2 — 上传引擎
+                api._notify_ui("splash:progress",
+                               {"status": "启动搜索引擎...", "progress": 0.4})
+                try:
+                    api._upload_engine = ConcurrentUploadEngine(
+                        api.config, api.db, notify_callback=api._notify_ui
+                    )
+                except Exception as e:
+                    api._notify_ui("app:error", {"message": "引擎初始化失败: " + str(e)})
+                    return
+
+                # Phase 3 — 搜索引擎
+                api._notify_ui("splash:progress",
+                               {"status": "加载混合搜索引擎...", "progress": 0.7})
+                try:
+                    api._search_engine = HybridSearchEngine(api.db, api._upload_engine)
+                except Exception as e:
+                    api._notify_ui("app:error", {"message": "搜索引擎初始化失败: " + str(e)})
+                    return
+
+                # Phase 4 — 导航到完整前端
+                api._notify_ui("splash:progress",
+                               {"status": "加载界面...", "progress": 1.0})
+                time.sleep(0.3)
+                try:
+                    window.load_url(_frontend_url)
+                except Exception:
+                    pass
+
+            threading.Thread(target=_init, daemon=True).start()
+        else:
+            # 第二次 loaded：完整前端加载完成 → 发送 app:ready 隐藏 loading overlay
             api._notify_ui("app:ready", {
                 "version": "1.0.0",
-                "total_files": api.db.get_total_files(),
+                "total_files": api.db.get_total_files() if api.db else 0,
             })
-        threading.Thread(target=_init, daemon=True).start()
 
     window.events.loaded += on_loaded
     webview.start(debug=False, private_mode=False)
