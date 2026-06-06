@@ -1,7 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-HyperFind — PyInstaller 打包配置 (macOS: COLLECT 目录模式, Windows: EXE 单文件)
-macOS 使用 COLLECT 避免单文件解压的 20+ 秒启动延迟。
+HyperFind — PyInstaller 打包配置
+macOS: COLLECT 目录模式（零解压延迟）
+Windows: EXE 单文件模式
 """
 
 import sys
@@ -102,32 +103,15 @@ A = Analysis(
 pyz = PYZ(A.pure)
 
 if IS_MAC:
-    # ── macOS: COLLECT 目录模式（文件预解压，瞬时启动）──
     exe = EXE(
-        pyz,
-        A.scripts,
-        [],              # 不打包 binaries 到 exe
-        [],              # 不打包 datas 到 exe
-        [],
+        pyz, A.scripts, [], [], [],
         name="HyperFind_bootstrap",
-        debug=False,
-        bootloader_ignore_signals=False,
-        strip=False,
-        upx=True,
-        console=False,
-        disable_windowed_traceback=False,
+        debug=False, strip=False, upx=True, console=False,
         argv_emulation=True,
-        target_arch=None,
-        codesign_identity=None,
-        entitlements_file=None,
     )
     coll = COLLECT(
-        exe,
-        A.binaries,
-        A.datas,
-        strip=False,
-        upx=True,
-        name="HyperFind",
+        exe, A.binaries, A.datas,
+        strip=False, upx=True, name="HyperFind",
     )
     app = BUNDLE(
         coll,
@@ -145,23 +129,18 @@ if IS_MAC:
             "CFBundleDocumentTypes": [],
         },
     )
+    # COLLECT+BUNDLE 把 webview JS 放到 Resources/ 但 pywebview 在 MacOS/ 查找
+    import shutil as _shutil
+    _macos_js = PROJECT_ROOT / "dist" / "HyperFind.app" / "Contents" / "MacOS" / "webview"
+    _resources_js = PROJECT_ROOT / "dist" / "HyperFind.app" / "Contents" / "Resources" / "webview"
+    if _resources_js.exists() and not _macos_js.exists():
+        _shutil.copytree(str(_resources_js), str(_macos_js))
+        print("  -> Copied webview/js to MacOS/ for COLLECT compatibility")
+
 elif IS_WIN:
-    # ── Windows: EXE 单文件模式 ──
     exe = EXE(
-        pyz,
-        A.scripts,
-        A.binaries,
-        A.datas,
-        [],
+        pyz, A.scripts, A.binaries, A.datas, [],
         name="HyperFind",
-        debug=False,
-        bootloader_ignore_signals=False,
-        strip=False,
-        upx=True,
-        console=False,
-        disable_windowed_traceback=False,
+        debug=False, strip=False, upx=True, console=False,
         argv_emulation=True,
-        target_arch=None,
-        codesign_identity=None,
-        entitlements_file=None,
     )
