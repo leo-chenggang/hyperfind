@@ -1,8 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-HyperFind — PyInstaller 打包配置
-macOS: COLLECT 目录模式（零解压延迟）
-Windows: EXE 单文件模式
+HyperFind — PyInstaller 打包配置 (macOS 单文件 + 缓存目录)
+使用 runtime_tmpdir 缓存解压，首次 20s，之后 <2s。
 """
 
 import sys
@@ -102,19 +101,20 @@ A = Analysis(
 
 pyz = PYZ(A.pure)
 
+# macOS: 单文件 + 持久缓存目录（首次解压 ~20s，后续 <2s）
+_RUNTIME_DIR = str(Path.home() / ".hermes" / "hyperfind_runtime")
+
+exe = EXE(
+    pyz, A.scripts, A.binaries, A.datas, [],
+    name="HyperFind",
+    debug=False, strip=False, upx=True, console=False,
+    argv_emulation=True,
+    runtime_tmpdir=_RUNTIME_DIR,
+)
+
 if IS_MAC:
-    exe = EXE(
-        pyz, A.scripts, [], [], [],
-        name="HyperFind_bootstrap",
-        debug=False, strip=False, upx=True, console=False,
-        argv_emulation=True,
-    )
-    coll = COLLECT(
-        exe, A.binaries, A.datas,
-        strip=False, upx=True, name="HyperFind",
-    )
     app = BUNDLE(
-        coll,
+        exe,
         name="HyperFind.app",
         icon="assets/icon.icns" if Path("assets/icon.icns").exists() else None,
         bundle_identifier="com.hyperfind.app",
@@ -128,19 +128,4 @@ if IS_MAC:
             "CFBundleDisplayName": "HyperFind",
             "CFBundleDocumentTypes": [],
         },
-    )
-    # COLLECT+BUNDLE 把 webview JS 放到 Resources/ 但 pywebview 在 MacOS/ 查找
-    import shutil as _shutil
-    _macos_js = PROJECT_ROOT / "dist" / "HyperFind.app" / "Contents" / "MacOS" / "webview"
-    _resources_js = PROJECT_ROOT / "dist" / "HyperFind.app" / "Contents" / "Resources" / "webview"
-    if _resources_js.exists() and not _macos_js.exists():
-        _shutil.copytree(str(_resources_js), str(_macos_js))
-        print("  -> Copied webview/js to MacOS/ for COLLECT compatibility")
-
-elif IS_WIN:
-    exe = EXE(
-        pyz, A.scripts, A.binaries, A.datas, [],
-        name="HyperFind",
-        debug=False, strip=False, upx=True, console=False,
-        argv_emulation=True,
     )

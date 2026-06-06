@@ -352,6 +352,24 @@ def main():
     config = AppConfig()
     api = HyperFindAPI(config)
 
+    # ── Warmup 模式：初始化引擎后立即退出（构建时预热 syspolicyd 缓存）──
+    if os.environ.get("HYPERFIND_WARMUP") == "1":
+        try:
+            api.db = Database(Path(api.config.db_path))
+        except Exception:
+            sys.exit(1)
+        try:
+            api._upload_engine = ConcurrentUploadEngine(
+                api.config, api.db, notify_callback=lambda e, d: None
+            )
+        except Exception:
+            sys.exit(1)
+        try:
+            api._search_engine = HybridSearchEngine(api.db, api._upload_engine)
+        except Exception:
+            sys.exit(1)
+        sys.exit(0)
+
     # 直接加载完整前端（COLLECT 模式零解压延迟，窗口瞬间出现）
     frontend_index = PROJECT_ROOT / "frontend" / "index.html"
     if not frontend_index.exists():
