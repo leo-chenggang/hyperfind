@@ -3,11 +3,9 @@ HyperFind — 本地文件管理与智能搜索桌面应用
 入口文件: pywebview 窗口 + 后端 API 桥接
 """
 
-import atexit
 import json
 import os
 import sys
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -356,21 +354,7 @@ _window_created = False
 def main():
     global _window_created
 
-    # PID 锁 — 防止重复启动
-    lock_path = Path(tempfile.gettempdir()) / "hyperfind.pid"
-    try:
-        if lock_path.exists():
-            old_pid = int(lock_path.read_text().strip())
-            try:
-                os.kill(old_pid, 0)
-                return
-            except (OSError, ProcessLookupError):
-                pass
-        lock_path.write_text(str(os.getpid()))
-        atexit.register(lambda: lock_path.unlink(missing_ok=True))
-    except Exception:
-        pass
-
+    # _window_created 守卫 — macOS Apple Events 可能重复触发 main()
     if _window_created:
         return
     _window_created = True
@@ -378,7 +362,7 @@ def main():
     config = AppConfig()
     api = HyperFindAPI(config)
 
-    # 使用 inline HTML 立即显示窗口（零文件 I/O，无延迟）
+    # 使用 inline HTML 立即显示窗口（零文件 I/O）
     window = webview.create_window(
         title="HyperFind",
         html=SPLASH_HTML,
@@ -394,18 +378,18 @@ def main():
     frontend_url = "file://" + str(PROJECT_ROOT / "frontend" / "index.html")
 
     def on_loaded():
-        """Splash 页面加载完成 → 后台初始化引擎 → 完成后切换到完整前端"""
+        """Splash 加载完成 → 稍等 JS 就绪 → 后台初始化 → 切换到完整前端"""
         def _init():
-            # 阶段 1: 数据库
-            api._notify_ui("splash:progress", {"status": "连接数据库...", "progress": 0.1})
+            time.sleep(0.2)  # 等 JS event handler 就绪
+
+            api._notify_ui("splash:progress", {"status": "连接数据库...", "progress": 0.15})
             try:
                 api.db = Database(Path(api.config.db_path))
             except Exception as e:
                 api._notify_ui("splash:progress", {"status": f"数据库错误: {e}", "progress": 0})
                 return
 
-            # 阶段 2: 上传引擎
-            api._notify_ui("splash:progress", {"status": "启动搜索引擎...", "progress": 0.3})
+            api._notify_ui("splash:progress", {"status": "启动搜索引擎...", "progress": 0.40})
             try:
                 api._upload_engine = ConcurrentUploadEngine(
                     api.config, api.db, notify_callback=api._notify_ui
@@ -414,8 +398,7 @@ def main():
                 api._notify_ui("splash:progress", {"status": f"引擎错误: {e}", "progress": 0})
                 return
 
-            # 阶段 3: 搜索引擎
-            api._notify_ui("splash:progress", {"status": "准备完成...", "progress": 0.8})
+            api._notify_ui("splash:progress", {"status": "准备完成...", "progress": 0.80})
             try:
                 api._search_engine = HybridSearchEngine(api.db, api._upload_engine)
             except Exception as e:
@@ -423,7 +406,7 @@ def main():
                 return
 
             api._notify_ui("splash:progress", {"status": "加载界面...", "progress": 1.0})
-            # 切换到完整前端
+            time.sleep(0.3)  # 让用户看到 100%
             window.load_url(frontend_url)
 
         threading.Thread(target=_init, daemon=True).start()
