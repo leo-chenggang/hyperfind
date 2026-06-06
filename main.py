@@ -348,17 +348,7 @@ if(e==='splash:progress'){var s=document.getElementById('status');if(s)s.textCon
 </body>
 </html>"""
 
-_window_created = False
-
-
 def main():
-    global _window_created
-
-    # _window_created 守卫 — macOS Apple Events 可能重复触发 main()
-    if _window_created:
-        return
-    _window_created = True
-
     config = AppConfig()
     api = HyperFindAPI(config)
 
@@ -376,9 +366,15 @@ def main():
     api._window = window
 
     frontend_url = "file://" + str(PROJECT_ROOT / "frontend" / "index.html")
+    _splash_done = False  # 防止 load_url → loaded 事件死循环
 
     def on_loaded():
-        """Splash 加载完成 → 稍等 JS 就绪 → 后台初始化 → 切换到完整前端"""
+        """Splash 加载完成 → 后台初始化引擎 → 切换到完整前端（仅执行一次）"""
+        nonlocal _splash_done
+        if _splash_done:
+            return  # 完整前端加载后不再触发
+        _splash_done = True
+
         def _init():
             time.sleep(0.2)  # 等 JS event handler 就绪
 
@@ -386,7 +382,7 @@ def main():
             try:
                 api.db = Database(Path(api.config.db_path))
             except Exception as e:
-                api._notify_ui("splash:progress", {"status": f"数据库错误: {e}", "progress": 0})
+                api._notify_ui("splash:progress", {"status": "数据库错误: " + str(e), "progress": 0})
                 return
 
             api._notify_ui("splash:progress", {"status": "启动搜索引擎...", "progress": 0.40})
@@ -395,19 +391,20 @@ def main():
                     api.config, api.db, notify_callback=api._notify_ui
                 )
             except Exception as e:
-                api._notify_ui("splash:progress", {"status": f"引擎错误: {e}", "progress": 0})
+                api._notify_ui("splash:progress", {"status": "引擎错误: " + str(e), "progress": 0})
                 return
 
             api._notify_ui("splash:progress", {"status": "准备完成...", "progress": 0.80})
             try:
                 api._search_engine = HybridSearchEngine(api.db, api._upload_engine)
             except Exception as e:
-                api._notify_ui("splash:progress", {"status": f"搜索错误: {e}", "progress": 0})
+                api._notify_ui("splash:progress", {"status": "搜索错误: " + str(e), "progress": 0})
                 return
 
             api._notify_ui("splash:progress", {"status": "加载界面...", "progress": 1.0})
             time.sleep(0.3)  # 让用户看到 100%
-            window.load_url(frontend_url)
+            # 用 JS 导航（线程安全，不会触发 loaded 事件死循环因为 _splash_done 已 True）
+            api._window.evaluate_js('window.location.replace("' + frontend_url + '")')
 
         threading.Thread(target=_init, daemon=True).start()
 
