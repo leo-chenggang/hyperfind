@@ -352,19 +352,7 @@ def main():
     config = AppConfig()
     api = HyperFindAPI(config)
 
-    # 使用 inline HTML 立即显示窗口（零文件 I/O）
-    window = webview.create_window(
-        title="HyperFind",
-        html=SPLASH_HTML,
-        js_api=api,
-        width=1200,
-        height=800,
-        min_size=(900, 600),
-        text_select=True,
-        confirm_close=False,
-    )
-    api._window = window
-
+    # 直接加载完整前端（COLLECT 模式零解压延迟，窗口瞬间出现）
     frontend_index = PROJECT_ROOT / "frontend" / "index.html"
     if not frontend_index.exists():
         if getattr(sys, "frozen", False):
@@ -375,46 +363,44 @@ def main():
         alt2 = Path(sys.executable).parent / "frontend" / "index.html" if getattr(sys, "frozen", False) else None
         if alt2 and alt2.exists():
             frontend_index = alt2
-    frontend_url = "file://" + str(frontend_index)
-    _splash_done = False  # 防止 loaded 事件死循环
+
+    window = webview.create_window(
+        title="HyperFind",
+        url="file://" + str(frontend_index),
+        js_api=api,
+        width=1200,
+        height=800,
+        min_size=(900, 600),
+        text_select=True,
+        confirm_close=False,
+    )
+    api._window = window
 
     def on_loaded():
-        """Splash 加载完成 → 后台初始化引擎 → 切换到完整前端（仅执行一次）"""
-        nonlocal _splash_done
-        if _splash_done:
-            return  # 完整前端加载后不再触发
-        _splash_done = True
-
+        """前端加载完成 → 后台初始化引擎"""
         def _init():
-            time.sleep(0.2)  # 等 JS event handler 就绪
-
-            api._notify_ui("splash:progress", {"status": "连接数据库...", "progress": 0.15})
+            time.sleep(0.1)
             try:
                 api.db = Database(Path(api.config.db_path))
             except Exception as e:
-                api._notify_ui("splash:progress", {"status": "数据库错误: " + str(e), "progress": 0})
+                api._notify_ui("app:error", {"message": str(e)})
                 return
-
-            api._notify_ui("splash:progress", {"status": "启动搜索引擎...", "progress": 0.40})
             try:
                 api._upload_engine = ConcurrentUploadEngine(
                     api.config, api.db, notify_callback=api._notify_ui
                 )
             except Exception as e:
-                api._notify_ui("splash:progress", {"status": "引擎错误: " + str(e), "progress": 0})
+                api._notify_ui("app:error", {"message": str(e)})
                 return
-
-            api._notify_ui("splash:progress", {"status": "准备完成...", "progress": 0.80})
             try:
                 api._search_engine = HybridSearchEngine(api.db, api._upload_engine)
             except Exception as e:
-                api._notify_ui("splash:progress", {"status": "搜索错误: " + str(e), "progress": 0})
+                api._notify_ui("app:error", {"message": str(e)})
                 return
-
-            api._notify_ui("splash:progress", {"status": "加载界面...", "progress": 1.0})
-            time.sleep(0.3)
-            api._window.load_url(frontend_url)
-
+            api._notify_ui("app:ready", {
+                "version": "1.0.0",
+                "total_files": api.db.get_total_files(),
+            })
         threading.Thread(target=_init, daemon=True).start()
 
     window.events.loaded += on_loaded
