@@ -366,10 +366,17 @@ def main():
     api._window = window
 
     frontend_index = PROJECT_ROOT / "frontend" / "index.html"
-    if not frontend_index.exists() and getattr(sys, "frozen", False):
-        frontend_index = PROJECT_ROOT.parent / "Resources" / "frontend" / "index.html"
+    if not frontend_index.exists():
+        if getattr(sys, "frozen", False):
+            alt = PROJECT_ROOT.parent / "Resources" / "frontend" / "index.html"
+            if alt.exists():
+                frontend_index = alt
+    if not frontend_index.exists():
+        alt2 = Path(sys.executable).parent / "frontend" / "index.html" if getattr(sys, "frozen", False) else None
+        if alt2 and alt2.exists():
+            frontend_index = alt2
     frontend_url = "file://" + str(frontend_index)
-    _splash_done = False  # 防止 load_url → loaded 事件死循环
+    _splash_done = False  # 防止 loaded 事件死循环
 
     def on_loaded():
         """Splash 加载完成 → 后台初始化引擎 → 切换到完整前端（仅执行一次）"""
@@ -405,9 +412,8 @@ def main():
                 return
 
             api._notify_ui("splash:progress", {"status": "加载界面...", "progress": 1.0})
-            time.sleep(0.3)  # 让用户看到 100%
-            # 用 JS 导航（线程安全，不会触发 loaded 事件死循环因为 _splash_done 已 True）
-            api._window.evaluate_js('window.location.replace("' + frontend_url + '")')
+            time.sleep(0.3)
+            api._window.load_url(frontend_url)
 
         threading.Thread(target=_init, daemon=True).start()
 
