@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-HyperFind — PyInstaller 打包配置 (macOS + Windows)
+HyperFind — PyInstaller 打包配置 (macOS: COLLECT 目录模式, Windows: EXE 单文件)
+macOS 使用 COLLECT 避免单文件解压的 20+ 秒启动延迟。
 """
 
 import sys
@@ -100,31 +101,36 @@ A = Analysis(
 
 pyz = PYZ(A.pure)
 
-exe = EXE(
-    pyz,
-    A.scripts,
-    A.binaries,
-    A.datas,
-    [],
-    name="HyperFind",
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=True,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon="assets/icon.icns" if IS_MAC and Path("assets/icon.icns").exists() else None,
-)
-
 if IS_MAC:
-    app = BUNDLE(
+    # ── macOS: COLLECT 目录模式（文件预解压，瞬时启动）──
+    exe = EXE(
+        pyz,
+        A.scripts,
+        [],              # 不打包 binaries 到 exe
+        [],              # 不打包 datas 到 exe
+        [],
+        name="HyperFind_bootstrap",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=True,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+    )
+    coll = COLLECT(
         exe,
+        A.binaries,
+        A.datas,
+        strip=False,
+        upx=True,
+        name="HyperFind",
+    )
+    app = BUNDLE(
+        coll,
         name="HyperFind.app",
         icon="assets/icon.icns" if Path("assets/icon.icns").exists() else None,
         bundle_identifier="com.hyperfind.app",
@@ -138,4 +144,24 @@ if IS_MAC:
             "CFBundleDisplayName": "HyperFind",
             "CFBundleDocumentTypes": [],
         },
+    )
+elif IS_WIN:
+    # ── Windows: EXE 单文件模式 ──
+    exe = EXE(
+        pyz,
+        A.scripts,
+        A.binaries,
+        A.datas,
+        [],
+        name="HyperFind",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=True,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
     )

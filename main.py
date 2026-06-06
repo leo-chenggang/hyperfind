@@ -365,7 +365,10 @@ def main():
     )
     api._window = window
 
-    frontend_url = "file://" + str(PROJECT_ROOT / "frontend" / "index.html")
+    frontend_index = PROJECT_ROOT / "frontend" / "index.html"
+    if not frontend_index.exists() and getattr(sys, "frozen", False):
+        frontend_index = PROJECT_ROOT.parent / "Resources" / "frontend" / "index.html"
+    frontend_url = "file://" + str(frontend_index)
     _splash_done = False  # 防止 load_url → loaded 事件死循环
 
     def on_loaded():
