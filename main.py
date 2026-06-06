@@ -73,12 +73,7 @@ class HyperFindAPI:
             self._upload_engine = ConcurrentUploadEngine(
                 self.config, self.db, notify_callback=self._notify_ui
             )
-            self._search_engine = HybridSearchEngine(
-                self.db,
-                self._upload_engine.embedder,
-                self._upload_engine.vector_store,
-                self._upload_engine.bm25_store,
-            )
+            self._search_engine = HybridSearchEngine(self.db, self._upload_engine)
             self._notify_ui("app:ready", {
                 "version": "1.0.0",
                 "total_files": self.db.get_total_files(),
@@ -217,10 +212,18 @@ class HyperFindAPI:
                 self._upload_engine.vector_store.delete_by_file_id(file_id)
             except Exception:
                 pass
-            try:
-                self._upload_engine.bm25_store.remove_by_prefix(file_id)
-            except Exception:
-                pass
+            with self._upload_engine._bm25_lock:
+                self._upload_engine._bm25_dirty = True
+                # 从待处理数据中移除该文件的 chunks
+                keep_texts = []
+                keep_ids = []
+                for tid, text in zip(self._upload_engine._bm25_pending_ids,
+                                     self._upload_engine._bm25_pending_texts):
+                    if not tid.startswith(file_id):
+                        keep_ids.append(tid)
+                        keep_texts.append(text)
+                self._upload_engine._bm25_pending_texts = keep_texts
+                self._upload_engine._bm25_pending_ids = keep_ids
 
         self._notify_ui("file:deleted", {
             "file_id": file_id, "file_type": file["file_type"],
@@ -245,10 +248,11 @@ class HyperFindAPI:
                 self._upload_engine.vector_store.clear_all()
             except Exception:
                 pass
-            try:
+            with self._upload_engine._bm25_lock:
+                self._upload_engine._bm25_pending_texts.clear()
+                self._upload_engine._bm25_pending_ids.clear()
+                self._upload_engine._bm25_dirty = True
                 self._upload_engine.bm25_store.index([], [])
-            except Exception:
-                pass
 
         self._notify_ui("files:cleared", {})
         return {"success": True, "deleted_count": len(files)}

@@ -1,16 +1,18 @@
 """
 HyperFind 混合搜索引擎
 BM25 (bm25s + jieba) + 向量 (ONNX + ChromaDB) + RRF 融合 + 三段过滤
+
+NOTE: BM25 索引采用延迟重建策略。上传时不重建，首次搜索时一次性构建。
 """
 
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from backend.database import Database
-from backend.indexer.embedder import ONNXEmbedder
-from backend.indexer.vector_store import VectorStore
-from backend.indexer.bm25_store import BM25Store
+
+if TYPE_CHECKING:
+    from backend.upload.engine import ConcurrentUploadEngine
 
 MAX_VECTOR_DISTANCE = 1.2
 MIN_BM25_SCORE = 0.0
@@ -19,19 +21,27 @@ RRF_K = 60
 
 
 class HybridSearchEngine:
-    """BM25 + 向量 + RRF 混合搜索引擎"""
+    """BM25 + 向量 + RRF 混合搜索引擎
 
-    def __init__(
-        self,
-        db: Database,
-        embedder: ONNXEmbedder,
-        vector_store: VectorStore,
-        bm25_store: BM25Store,
-    ):
+    接收 upload_engine 引用，按需访问其内嵌的 embedder/vector_store/bm25_store。
+    首次搜索时自动触发 BM25 延迟重建。
+    """
+
+    def __init__(self, db: Database, upload_engine: "ConcurrentUploadEngine"):
         self.db = db
-        self.embedder = embedder
-        self.vector_store = vector_store
-        self.bm25_store = bm25_store
+        self._engine = upload_engine
+
+    @property
+    def embedder(self):
+        return self._engine.embedder
+
+    @property
+    def vector_store(self):
+        return self._engine.vector_store
+
+    @property
+    def bm25_store(self):
+        return self._engine.bm25_store
 
     def search(
         self,
@@ -40,6 +50,10 @@ class HybridSearchEngine:
         search_mode: str = "hybrid",
     ) -> dict:
         t0 = time.perf_counter()
+
+        # Step 0: 延迟重建 BM25（首次搜索时触发）
+        if search_mode in ("hybrid", "keyword"):
+            self._engine.ensure_bm25_ready()
 
         # Step 1: BM25 关键词搜索
         bm25_results = []
@@ -84,7 +98,7 @@ class HybridSearchEngine:
                 continue
             matched.append((chunk_id, score))
 
-        # Step 5: 按 file_id 分组（修复 N+1 — 每个文件只查一次 DB）
+        # Step 5: 按 file_id 分组
         grouped = self._group_by_file(matched, bm25_results, vector_results)
 
         # Step 6: 文件类型过滤
@@ -121,14 +135,12 @@ class HybridSearchEngine:
         bm25_results: list[dict],
         vector_results: list[dict],
     ) -> list[dict]:
-        # chunk_id → file_id 索引
         chunk_index: dict[str, str] = {}
         for r in bm25_results + vector_results:
             cid = r["chunk_id"]
             if cid not in chunk_index:
                 chunk_index[cid] = r.get("file_id", cid.rsplit("_", 1)[0])
 
-        # 按 file_id 分组 (chunk_id, rrf_score)
         file_groups: dict[str, list[tuple[str, float]]] = {}
         for chunk_id, rrf_score in matched:
             fid = chunk_index.get(chunk_id, chunk_id.rsplit("_", 1)[0])
@@ -140,7 +152,6 @@ class HybridSearchEngine:
             if not file:
                 continue
 
-            # 一次查询该文件的所有 chunks（修复原 N+1 问题）
             all_chunks = {c["chunk_id"]: c for c in self.db.get_chunks_by_file(fid)}
 
             snippets = []

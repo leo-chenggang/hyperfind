@@ -10,6 +10,7 @@ NOTE: 使用单线程顺序处理而非 ThreadPoolExecutor。
 
 import hashlib
 import os
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -42,6 +43,12 @@ class ConcurrentUploadEngine:
         self._vector_store: Optional[VectorStore] = None
         self._bm25_store: Optional[BM25Store] = None
 
+        # BM25 延迟重建：上传时仅收集，首次搜索时一次性重建
+        self._bm25_dirty = False
+        self._bm25_pending_texts: list[str] = []
+        self._bm25_pending_ids: list[str] = []
+        self._bm25_lock = threading.Lock()
+
     @property
     def embedder(self) -> ONNXEmbedder:
         if self._embedder is None:
@@ -63,22 +70,26 @@ class ConcurrentUploadEngine:
     def bm25_store(self) -> BM25Store:
         if self._bm25_store is None:
             self._bm25_store = BM25Store()
-            self._rebuild_bm25()
         return self._bm25_store
 
-    def _rebuild_bm25(self) -> None:
-        """从数据库重建 BM25 索引（应用启动时调用一次）"""
-        try:
-            all_file_ids = self.db.get_all_file_ids()
-            corpus, chunk_ids = [], []
-            for fid in all_file_ids:
+    def ensure_bm25_ready(self) -> None:
+        """确保 BM25 索引已构建（首次搜索时调用，一次性重建所有待处理数据）"""
+        with self._bm25_lock:
+            if not self._bm25_dirty:
+                return
+            # 合并数据库已有数据 + 待处理的增量
+            all_texts = list(self._bm25_pending_texts)
+            all_ids = list(self._bm25_pending_ids)
+            for fid in self.db.get_all_file_ids():
                 for c in self.db.get_chunks_by_file(fid):
-                    corpus.append(c["content"])
-                    chunk_ids.append(c["chunk_id"])
-            if corpus:
-                self._bm25_store.index(corpus, chunk_ids)
-        except Exception:
-            pass
+                    cid = c["chunk_id"]
+                    if cid not in all_ids:
+                        all_texts.append(c["content"])
+                        all_ids.append(cid)
+            self._bm25_store.index(all_texts, all_ids)
+            self._bm25_dirty = False
+            self._bm25_pending_texts.clear()
+            self._bm25_pending_ids.clear()
 
     # ── 公共 API ────────────────────────────────────────
 
@@ -169,10 +180,13 @@ class ConcurrentUploadEngine:
             } for i in range(len(chunks))]
             self.vector_store.add_vectors(chunk_ids, embeddings, chunk_texts, metadatas)
 
-        # Step 8: BM25 索引
+        # Step 8: BM25 延迟 — 仅收集数据，首次搜索时一次性重建
         self._notify("file:progress", {
             "index": index, "file_name": fname, "status": "indexing", "progress": 0.85})
-        self.bm25_store.update(chunk_texts, chunk_ids)
+        with self._bm25_lock:
+            self._bm25_pending_texts.extend(chunk_texts)
+            self._bm25_pending_ids.extend(chunk_ids)
+            self._bm25_dirty = True
 
         # Step 9: SQLite 写入
         file_size = file_path.stat().st_size
